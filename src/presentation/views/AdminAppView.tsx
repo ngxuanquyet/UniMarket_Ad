@@ -79,7 +79,7 @@ export function AdminAppView({ controller, themeMode, onToggleTheme }: Props) {
         <section className="login-card">
           <header className="login-header">
             <div className="brand-row">
-              <div className="brand-icon">U</div>
+              <img className="brand-logo" src="/icon_unimarket.png" alt="UniMarket logo" />
               <h1>UniMarket Admin</h1>
             </div>
             <button type="button" className="theme-toggle-btn" onClick={onToggleTheme}>
@@ -145,7 +145,7 @@ export function AdminAppView({ controller, themeMode, onToggleTheme }: Props) {
     <main className="page dashboard-page">
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <div className="brand-icon">U</div>
+          <img className="brand-logo" src="/icon_unimarket.png" alt="UniMarket logo" />
           <div>
             <p className="sidebar-brand-title">UniMarket</p>
             <p className="sidebar-brand-subtitle">Admin</p>

@@ -182,6 +182,14 @@ body,
   place-items: center;
 }
 
+.brand-logo {
+  width: 80px;
+  height: 80px;
+  border-radius: 8px;
+  object-fit: contain;
+  display: block;
+}
+
 .brand-row h1 {
   margin: 0;
   font-size: 1.65rem;
