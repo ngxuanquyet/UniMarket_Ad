@@ -22,13 +22,23 @@ export type PayoutItem = {
   id: string
   seller: string
   amount: string
+  amountValue: number
   status: string
+  receiverAccount: string
+  receiverMethodType: string
+  receiverBankCode: string
+  receiverBankName: string
+  receiverAccountName: string
+  receiverAccountNumber: string
+  receiverPhoneNumber: string
 }
 
 export type UserItem = {
   id: string
   name: string
   email: string
+  avatarUrl: string
+  walletBalance: number | null
   isLocked: boolean
 }
 
@@ -44,9 +54,15 @@ export type ProductItem = {
   category: string
   createdAt: number
   imageUrls: string[]
+  specifications: Record<string, string>
 }
 
 export type ProductFormMode = 'create' | 'edit'
+export type ProductModerationAction = 'APPROVE' | 'REJECT' | 'DISABLE' | 'ENABLE'
+export type ProductSpecificationField = {
+  key: string
+  value: string
+}
 
 export type ProductFormState = {
   name: string
@@ -56,6 +72,7 @@ export type ProductFormState = {
   price: string
   quantityAvailable: string
   description: string
+  specifications: ProductSpecificationField[]
   category: string
   imageUrl: string
 }
@@ -84,6 +101,7 @@ export const defaultProductFormState: ProductFormState = {
   price: '',
   quantityAvailable: '',
   description: '',
+  specifications: [{ key: '', value: '' }],
   category: '',
   imageUrl: ''
 }

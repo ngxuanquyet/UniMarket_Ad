@@ -14,15 +14,18 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
   limit,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   updateDoc
 } from 'firebase/firestore'
 import {
   DashboardData,
+  ProductModerationAction,
   ProductItem,
   ProductSaveInput,
   ReportItem,
@@ -46,17 +49,87 @@ function toMillis(value: unknown): number {
 }
 
 function toPayoutMoney(amount: number): string {
-  return amount.toLocaleString('en-US', {
+  return amount.toLocaleString('vi-VN', {
     style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
+    currency: 'VND',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0
   })
 }
 
 function toNumberOrNull(value: string): number | null {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : null
+}
+
+function toStringOrEmpty(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function toNumberOrNullFromUnknown(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
+function toStringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object') return {}
+  return Object.entries(value as Record<string, unknown>).reduce<Record<string, string>>(
+    (acc, [key, itemValue]) => {
+      if (typeof itemValue === 'string' && itemValue.trim()) {
+        acc[key] = itemValue.trim()
+      }
+      return acc
+    },
+    {}
+  )
+}
+
+function maskSuffix(value: string): string {
+  const trimmed = value.trim()
+  if (trimmed.length <= 4) return trimmed
+  return `••••${trimmed.slice(-4)}`
+}
+
+function toReceiverAccountLabel(value: unknown): string {
+  const map = value as Record<string, unknown> | null
+  if (!map || typeof map !== 'object') return ''
+  const type = toStringOrEmpty(map.type).toUpperCase()
+  const label = toStringOrEmpty(map.label)
+  const bankName = toStringOrEmpty(map.bankName)
+  const accountNumber = toStringOrEmpty(map.accountNumber)
+  const phoneNumber = toStringOrEmpty(map.phoneNumber)
+
+  if (type === 'BANK_TRANSFER') {
+    const title = label || bankName || 'Bank transfer'
+    const suffix = accountNumber ? maskSuffix(accountNumber) : ''
+    return [title, suffix].filter(Boolean).join(' • ')
+  }
+  if (type === 'MOMO') {
+    return `MoMo • ${maskSuffix(phoneNumber)}`
+  }
+  return label
+}
+
+function toReceiverMethod(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object') return {}
+  return value as Record<string, unknown>
+}
+
+function parseSpecificationsRows(
+  rows: Array<{ key: string; value: string }>
+): Record<string, string> {
+  return rows.reduce<Record<string, string>>((acc, row) => {
+    const key = row.key.trim()
+    const value = row.value.trim()
+    if (key && value) {
+      acc[key] = value
+    }
+    return acc
+  }, {})
 }
 
 export class FirebaseAdminRepository implements AdminRepository {
@@ -109,6 +182,17 @@ export class FirebaseAdminRepository implements AdminRepository {
       const data = userDoc.data()
       const accountStatus =
         typeof data.accountStatus === 'string' ? data.accountStatus.toUpperCase() : ''
+      const avatarUrl =
+        toStringOrEmpty(data.avatarUrl) ||
+        toStringOrEmpty(data.photoURL) ||
+        toStringOrEmpty(data.photoUrl) ||
+        toStringOrEmpty(data.profileImageUrl) ||
+        toStringOrEmpty(data.profilePicture) ||
+        toStringOrEmpty(data.imageUrl)
+      const walletBalance =
+        toNumberOrNullFromUnknown(data.walletBalance) ??
+        toNumberOrNullFromUnknown(data.balance) ??
+        toNumberOrNullFromUnknown(data.wallet)
       const isLocked =
         data.isLock === true ||
         data.authDisabled === true ||
@@ -122,6 +206,8 @@ export class FirebaseAdminRepository implements AdminRepository {
           (typeof data.displayName === 'string' && data.displayName.trim()) ||
           userDoc.id,
         email: (typeof data.email === 'string' && data.email.trim()) || '-',
+        avatarUrl,
+        walletBalance,
         isLocked
       }
     })
@@ -171,7 +257,8 @@ export class FirebaseAdminRepository implements AdminRepository {
           (typeof data.categoryName === 'string' && data.categoryName.trim()) ||
           '',
         createdAt: toMillis(data.createdAt),
-        imageUrls
+        imageUrls,
+        specifications: toStringRecord(data.specifications)
       }
     })
 
@@ -216,7 +303,7 @@ export class FirebaseAdminRepository implements AdminRepository {
     ).length
 
     const todaySales = await this.fetchTodaySales()
-    const payouts = await this.fetchPendingPayouts(usersMap)
+    const payouts = await this.fetchPayoutRequests(usersMap)
 
     return {
       stats: {
@@ -242,10 +329,100 @@ export class FirebaseAdminRepository implements AdminRepository {
   }
 
   async approvePayout(payoutId: string): Promise<void> {
-    await updateDoc(doc(db, 'payoutRequests', payoutId), {
-      status: 'APPROVED',
-      approvedAt: serverTimestamp(),
-      approvedBy: auth.currentUser?.uid || ''
+    const currentAdminId = auth.currentUser?.uid || ''
+    const nextStatus = 'APPROVED'
+    const payoutRef = doc(db, 'payoutRequests', payoutId)
+    const payoutSnapshot = await getDoc(payoutRef)
+    if (!payoutSnapshot.exists()) {
+      throw new Error('Payout request not found.')
+    }
+
+    const payoutData = payoutSnapshot.data()
+    const receiverId =
+      (typeof payoutData.sellerId === 'string' && payoutData.sellerId.trim()) ||
+      (typeof payoutData.requesterId === 'string' && payoutData.requesterId.trim()) ||
+      ''
+    const amount = typeof payoutData.amount === 'number' ? payoutData.amount : 0
+    const currency =
+      (typeof payoutData.currency === 'string' && payoutData.currency.trim()) || 'VND'
+    const receiverMethod = payoutData.receiverMethod
+    const receiverMethodId =
+      typeof payoutData.receiverMethodId === 'string' ? payoutData.receiverMethodId : ''
+    const receiverMethodType =
+      typeof payoutData.receiverMethodType === 'string' ? payoutData.receiverMethodType : ''
+    const receiverMethodLabel =
+      typeof payoutData.receiverMethodLabel === 'string' ? payoutData.receiverMethodLabel : ''
+    const receiverMethodSubtitle =
+      typeof payoutData.receiverMethodSubtitle === 'string' ? payoutData.receiverMethodSubtitle : ''
+    const previousStatus =
+      typeof payoutData.status === 'string' ? payoutData.status.toUpperCase() : 'PENDING'
+
+    await runTransaction(db, async (transaction) => {
+      const freshPayout = await transaction.get(payoutRef)
+      if (!freshPayout.exists()) {
+        throw new Error('Payout request not found.')
+      }
+
+      const freshData = freshPayout.data()
+      const freshStatus =
+        typeof freshData.status === 'string' ? freshData.status.toUpperCase() : 'PENDING'
+      const shouldCreateNotification = freshStatus !== nextStatus
+      const walletTxRef = receiverId
+        ? doc(db, 'users', receiverId, 'walletTransactions', `withdraw_${payoutId}`)
+        : null
+      const walletTxSnapshot = walletTxRef ? await transaction.get(walletTxRef) : null
+
+      transaction.update(payoutRef, {
+        status: nextStatus,
+        approvedAt: serverTimestamp(),
+        approvedBy: currentAdminId,
+        updatedAt: serverTimestamp()
+      })
+
+      if (!receiverId) return
+
+      if (walletTxRef != null && walletTxSnapshot?.exists()) {
+        transaction.update(walletTxRef, {
+          status: nextStatus,
+          updatedAt: serverTimestamp(),
+          source: 'WEB_ADMIN'
+        })
+      } else if (walletTxRef != null) {
+        transaction.set(walletTxRef, {
+          type: 'WITHDRAW',
+          payoutRequestId: payoutId,
+          amount,
+          currency,
+          status: nextStatus,
+          title: 'Wallet withdrawal',
+          receiverMethod,
+          receiverMethodId,
+          receiverMethodType,
+          receiverMethodLabel,
+          receiverMethodSubtitle,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          source: 'WEB_ADMIN'
+        })
+      }
+
+      if (shouldCreateNotification) {
+        const notificationRef = doc(collection(db, 'users', receiverId, 'notifications'))
+        transaction.set(notificationRef, {
+          title: 'Cap nhat lenh rut tien',
+          body: `Lenh rut ${amount.toLocaleString('vi-VN')} ${currency} da chuyen sang trang thai ${nextStatus}.`,
+          type: 'payout_request',
+          payoutRequestId: payoutId,
+          status: nextStatus,
+          previousStatus,
+          amount,
+          currency,
+          isRead: false,
+          createdAt: serverTimestamp(),
+          receiverId,
+          source: 'WEB_ADMIN'
+        })
+      }
     })
   }
 
@@ -257,6 +434,7 @@ export class FirebaseAdminRepository implements AdminRepository {
     const description = input.form.description.trim()
     const category = input.form.category.trim()
     const imageUrl = input.form.imageUrl.trim()
+    const specifications = parseSpecificationsRows(input.form.specifications)
     const price = toNumberOrNull(input.form.price.trim())
     const quantityAvailable = toNumberOrNull(input.form.quantityAvailable.trim())
 
@@ -267,7 +445,9 @@ export class FirebaseAdminRepository implements AdminRepository {
       sellerName: input.form.sellerName.trim(),
       moderationStatus: status,
       status,
+      isVisible: status === 'APPROVED',
       description,
+      specifications,
       category,
       categoryName: category,
       updatedAt: serverTimestamp()
@@ -301,12 +481,22 @@ export class FirebaseAdminRepository implements AdminRepository {
       description,
       category,
       createdAt: Date.now(),
-      imageUrls: imageUrl ? [imageUrl] : []
+      imageUrls: imageUrl ? [imageUrl] : [],
+      specifications
     }
   }
 
   async deleteProduct(productId: string): Promise<void> {
     await deleteDoc(doc(db, 'products', productId))
+  }
+
+  async moderateProduct(
+    productId: string,
+    action: ProductModerationAction,
+    reason = ''
+  ): Promise<void> {
+    const idToken = await this.getIdToken()
+    await this.adminApiClient.moderateProduct(productId, action, reason.trim(), idToken)
   }
 
   async setUserLock(userId: string, disabled: boolean): Promise<void> {
@@ -368,7 +558,7 @@ export class FirebaseAdminRepository implements AdminRepository {
     }
   }
 
-  private async fetchPendingPayouts(usersMap: Map<string, string>) {
+  private async fetchPayoutRequests(usersMap: Map<string, string>) {
     try {
       const payoutSnapshot = await getDocs(
         query(collection(db, 'payoutRequests'), orderBy('createdAt', 'desc'), limit(15))
@@ -380,14 +570,40 @@ export class FirebaseAdminRepository implements AdminRepository {
           const seller = usersMap.get(sellerId) || sellerId || 'Unknown seller'
           const amount = typeof data.amount === 'number' ? data.amount : 0
           const status = typeof data.status === 'string' ? data.status.toUpperCase() : 'PENDING'
+          const receiverMethod = toReceiverMethod(data.receiverMethod)
+          const receiverMethodType =
+            toStringOrEmpty(receiverMethod.type) || toStringOrEmpty(data.receiverMethodType)
+          const receiverBankCode =
+            toStringOrEmpty(receiverMethod.bankCode) || toStringOrEmpty(data.receiverMethodBankCode)
+          const receiverBankName =
+            toStringOrEmpty(receiverMethod.bankName) || toStringOrEmpty(data.receiverMethodBankName)
+          const receiverAccountName =
+            toStringOrEmpty(receiverMethod.accountName) || toStringOrEmpty(data.receiverMethodAccountName)
+          const receiverAccountNumber =
+            toStringOrEmpty(receiverMethod.accountNumber) || toStringOrEmpty(data.receiverMethodAccountNumber)
+          const receiverPhoneNumber =
+            toStringOrEmpty(receiverMethod.phoneNumber) || toStringOrEmpty(data.receiverMethodPhoneNumber)
+          const receiverAccountFromObject = toReceiverAccountLabel(receiverMethod)
+          const receiverAccount =
+            receiverAccountFromObject ||
+            toStringOrEmpty(data.receiverMethodSubtitle) ||
+            toStringOrEmpty(data.receiverMethodLabel) ||
+            '-'
           return {
             id: payoutDoc.id,
             seller,
             amount: toPayoutMoney(amount),
-            status
+            amountValue: amount,
+            status,
+            receiverAccount,
+            receiverMethodType,
+            receiverBankCode,
+            receiverBankName,
+            receiverAccountName,
+            receiverAccountNumber,
+            receiverPhoneNumber
           }
         })
-        .filter((item) => item.status === 'PENDING')
     } catch {
       return []
     }

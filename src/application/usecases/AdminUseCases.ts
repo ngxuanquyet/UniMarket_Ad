@@ -1,6 +1,7 @@
 import { User } from 'firebase/auth'
 import {
   DashboardData,
+  ProductModerationAction,
   ProductSaveInput
 } from '../../domain/entities/admin'
 import { AdminRepository } from '../../domain/repositories/AdminRepository'
@@ -50,6 +51,10 @@ export class AdminUseCases {
 
   deleteProduct(productId: string): Promise<void> {
     return this.repository.deleteProduct(productId)
+  }
+
+  moderateProduct(productId: string, action: ProductModerationAction, reason = ''): Promise<void> {
+    return this.repository.moderateProduct(productId, action, reason)
   }
 
   setUserLock(userId: string, disabled: boolean): Promise<void> {

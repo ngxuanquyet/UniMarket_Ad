@@ -20,6 +20,22 @@ export class AdminApiClient {
     })
   }
 
+  async moderateProduct(
+    productId: string,
+    action: 'APPROVE' | 'REJECT' | 'DISABLE' | 'ENABLE',
+    reason: string,
+    idToken: string
+  ): Promise<void> {
+    await this.request(`/admin/products/${encodeURIComponent(productId)}/moderate`, {
+      method: 'POST',
+      idToken,
+      body: {
+        action,
+        reason
+      }
+    })
+  }
+
   private async request(
     path: string,
     options: {

@@ -1,6 +1,7 @@
 import { User } from 'firebase/auth'
 import {
   DashboardData,
+  ProductModerationAction,
   ProductItem,
   ProductSaveInput
 } from '../entities/admin'
@@ -19,6 +20,7 @@ export interface AdminRepository {
   approvePayout(payoutId: string): Promise<void>
   saveProduct(input: ProductSaveInput): Promise<ProductItem>
   deleteProduct(productId: string): Promise<void>
+  moderateProduct(productId: string, action: ProductModerationAction, reason?: string): Promise<void>
 
   setUserLock(userId: string, disabled: boolean): Promise<void>
   deleteUser(userId: string): Promise<void>

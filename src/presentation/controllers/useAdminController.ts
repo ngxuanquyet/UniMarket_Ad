@@ -3,6 +3,7 @@ import { AdminUseCases } from '../../application/usecases/AdminUseCases'
 import {
   AuthScreenState,
   PayoutItem,
+  ProductModerationAction,
   ProductFormMode,
   ProductFormState,
   ProductItem,
@@ -40,6 +41,8 @@ export function useAdminController(useCases: AdminUseCases) {
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null)
   const [processingUserIds, setProcessingUserIds] = useState<string[]>([])
   const [processingProductIds, setProcessingProductIds] = useState<string[]>([])
+  const [processingReportIds, setProcessingReportIds] = useState<string[]>([])
+  const [processingPayoutIds, setProcessingPayoutIds] = useState<string[]>([])
   const [isProductFormOpen, setIsProductFormOpen] = useState(false)
   const [isSavingProduct, setIsSavingProduct] = useState(false)
   const [productFormMode, setProductFormMode] = useState<ProductFormMode>('create')
@@ -154,7 +157,9 @@ export function useAdminController(useCases: AdminUseCases) {
   }
 
   const handleResolveReport = async (reportId: string) => {
+    if (processingReportIds.includes(reportId)) return
     setActionMessage('')
+    setProcessingReportIds((prev) => [...prev, reportId])
     try {
       await useCases.resolveReport(reportId)
       setReports((prev) =>
@@ -164,18 +169,26 @@ export function useAdminController(useCases: AdminUseCases) {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to resolve report.'
       setActionMessage(message)
+    } finally {
+      setProcessingReportIds((prev) => prev.filter((id) => id !== reportId))
     }
   }
 
   const handleApprovePayout = async (payoutId: string) => {
+    if (processingPayoutIds.includes(payoutId)) return
     setActionMessage('')
+    setProcessingPayoutIds((prev) => [...prev, payoutId])
     try {
       await useCases.approvePayout(payoutId)
-      setPayouts((prev) => prev.filter((item) => item.id !== payoutId))
+      setPayouts((prev) =>
+        prev.map((item) => (item.id === payoutId ? { ...item, status: 'APPROVED' } : item))
+      )
       setActionMessage('Payout approved successfully.')
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to approve payout.'
       setActionMessage(message)
+    } finally {
+      setProcessingPayoutIds((prev) => prev.filter((id) => id !== payoutId))
     }
   }
 
@@ -222,6 +235,10 @@ export function useAdminController(useCases: AdminUseCases) {
   const openEditProductForm = (item: ProductItem) => {
     setProductFormMode('edit')
     setEditingProductId(item.id)
+    const mappedSpecs = Object.entries(item.specifications || {}).map(([key, value]) => ({
+      key,
+      value
+    }))
     setProductForm({
       name: item.name,
       sellerId: item.sellerId,
@@ -230,6 +247,7 @@ export function useAdminController(useCases: AdminUseCases) {
       price: item.price == null ? '' : String(item.price),
       quantityAvailable: item.quantityAvailable == null ? '' : String(item.quantityAvailable),
       description: item.description,
+      specifications: mappedSpecs.length > 0 ? mappedSpecs : [{ key: '', value: '' }],
       category: item.category,
       imageUrl: item.imageUrls[0] || ''
     })
@@ -299,6 +317,7 @@ export function useAdminController(useCases: AdminUseCases) {
     try {
       await useCases.deleteProduct(item.id)
       setProducts((prev) => prev.filter((product) => product.id !== item.id))
+      setSelectedProduct((prev) => (prev?.id === item.id ? null : prev))
       setStats((prev) => ({
         ...prev,
         pendingVerifications:
@@ -310,6 +329,61 @@ export function useAdminController(useCases: AdminUseCases) {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to delete product.'
       setActionMessage(message)
+    } finally {
+      setProcessingProductIds((prev) => prev.filter((id) => id !== item.id))
+    }
+  }
+
+  const handleModerateProduct = async (
+    item: ProductItem,
+    action: ProductModerationAction,
+    reason = ''
+  ) => {
+    setProcessingProductIds((prev) => [...prev, item.id])
+    setActionMessage('')
+    try {
+      await useCases.moderateProduct(item.id, action, reason)
+      const nextStatus =
+        action === 'APPROVE' || action === 'ENABLE'
+          ? 'APPROVED'
+          : action === 'DISABLE'
+            ? 'DISABLED'
+            : 'REJECTED'
+      setProducts((prev) =>
+        prev.map((product) =>
+          product.id === item.id
+            ? {
+                ...product,
+                moderationStatus: nextStatus
+              }
+            : product
+        )
+      )
+      setSelectedProduct((prev) =>
+        prev?.id === item.id
+          ? {
+              ...prev,
+              moderationStatus: nextStatus
+            }
+          : prev
+      )
+      if (item.moderationStatus === 'PENDING') {
+        setStats((prev) => ({
+          ...prev,
+          pendingVerifications: Math.max(0, prev.pendingVerifications - 1)
+        }))
+      }
+      setActionMessage(
+        action === 'APPROVE'
+          ? `Product ${item.id} has been approved.`
+          : action === 'REJECT'
+            ? `Product ${item.id} has been rejected.`
+            : action === 'DISABLE'
+              ? `Product ${item.id} has been disabled.`
+              : `Product ${item.id} has been enabled.`
+      )
+    } catch (error) {
+      setActionMessage(useCases.mapActionError(error))
     } finally {
       setProcessingProductIds((prev) => prev.filter((id) => id !== item.id))
     }
@@ -329,7 +403,11 @@ export function useAdminController(useCases: AdminUseCases) {
   const userResults = useMemo(() => {
     const keyword = searchTerm.trim().toLowerCase()
     if (!keyword) return users
-    return users.filter((item) => `${item.id} ${item.name} ${item.email}`.toLowerCase().includes(keyword))
+    return users.filter((item) =>
+      `${item.id} ${item.name} ${item.email} ${item.avatarUrl} ${item.walletBalance ?? ''}`
+        .toLowerCase()
+        .includes(keyword)
+    )
   }, [users, searchTerm])
 
   const productResults = useMemo(() => {
@@ -345,8 +423,17 @@ export function useAdminController(useCases: AdminUseCases) {
   const payoutResults = useMemo(() => {
     const keyword = searchTerm.trim().toLowerCase()
     if (!keyword) return payouts
-    return payouts.filter((item) => `${item.seller} ${item.amount}`.toLowerCase().includes(keyword))
+    return payouts.filter((item) =>
+      `${item.seller} ${item.amount} ${item.status}`.toLowerCase().includes(keyword)
+    )
   }, [payouts, searchTerm])
+
+  const isActionLoading =
+    isSavingProduct ||
+    processingUserIds.length > 0 ||
+    processingProductIds.length > 0 ||
+    processingReportIds.length > 0 ||
+    processingPayoutIds.length > 0
 
   return {
     authScreenState,
@@ -370,6 +457,9 @@ export function useAdminController(useCases: AdminUseCases) {
     selectedProduct,
     processingUserIds,
     processingProductIds,
+    processingReportIds,
+    processingPayoutIds,
+    isActionLoading,
     isProductFormOpen,
     isSavingProduct,
     productFormMode,
@@ -397,6 +487,7 @@ export function useAdminController(useCases: AdminUseCases) {
     openEditProductForm,
     closeProductForm,
     handleSaveProduct,
-    handleDeleteProduct
+    handleDeleteProduct,
+    handleModerateProduct
   }
 }
