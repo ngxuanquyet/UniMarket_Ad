@@ -23,6 +23,7 @@ export type PayoutItem = {
   seller: string
   amount: string
   amountValue: number
+  createdAt: number
   status: string
   receiverAccount: string
   receiverMethodType: string
@@ -52,9 +53,18 @@ export type ProductItem = {
   quantityAvailable: number | null
   description: string
   category: string
+  condition: string
   createdAt: number
   imageUrls: string[]
   specifications: Record<string, string>
+  deliveryMethodsAvailable: string[]
+  sellerPickupAddress: {
+    id: string
+    recipientName: string
+    phoneNumber: string
+    addressLine: string
+    isDefault: boolean
+  } | null
 }
 
 export type ProductFormMode = 'create' | 'edit'
@@ -74,7 +84,12 @@ export type ProductFormState = {
   description: string
   specifications: ProductSpecificationField[]
   category: string
-  imageUrl: string
+  condition: string
+  deliveryMethodsAvailable: string[]
+  pickupAddressRecipientName: string
+  pickupAddressPhoneNumber: string
+  pickupAddressLine: string
+  imageUrlsText: string
 }
 
 export type DashboardStats = {
@@ -103,7 +118,12 @@ export const defaultProductFormState: ProductFormState = {
   description: '',
   specifications: [{ key: '', value: '' }],
   category: '',
-  imageUrl: ''
+  condition: '',
+  deliveryMethodsAvailable: [],
+  pickupAddressRecipientName: '',
+  pickupAddressPhoneNumber: '',
+  pickupAddressLine: '',
+  imageUrlsText: ''
 }
 
 export type DashboardData = {

@@ -116,6 +116,18 @@ export function useAdminController(useCases: AdminUseCases) {
     }
   }, [authScreenState, loadDashboardData])
 
+  useEffect(() => {
+    if (!selectedProduct) return
+    const latestSelected = products.find((item) => item.id === selectedProduct.id) ?? null
+    if (!latestSelected) {
+      setSelectedProduct(null)
+      return
+    }
+    if (latestSelected !== selectedProduct) {
+      setSelectedProduct(latestSelected)
+    }
+  }, [products, selectedProduct])
+
   const selectedReport = useMemo(
     () => reports.find((item) => item.id === selectedReportId) ?? null,
     [reports, selectedReportId]
@@ -249,7 +261,12 @@ export function useAdminController(useCases: AdminUseCases) {
       description: item.description,
       specifications: mappedSpecs.length > 0 ? mappedSpecs : [{ key: '', value: '' }],
       category: item.category,
-      imageUrl: item.imageUrls[0] || ''
+      condition: item.condition || '',
+      deliveryMethodsAvailable: item.deliveryMethodsAvailable || [],
+      pickupAddressRecipientName: item.sellerPickupAddress?.recipientName || '',
+      pickupAddressPhoneNumber: item.sellerPickupAddress?.phoneNumber || '',
+      pickupAddressLine: item.sellerPickupAddress?.addressLine || '',
+      imageUrlsText: item.imageUrls.join('\n')
     })
     setIsProductFormOpen(true)
   }
@@ -266,6 +283,23 @@ export function useAdminController(useCases: AdminUseCases) {
     const sellerId = productForm.sellerId.trim()
     if (!name || !sellerId) {
       setActionMessage('Name and seller ID are required.')
+      return
+    }
+    if (!productForm.condition.trim()) {
+      setActionMessage('Condition is required.')
+      return
+    }
+    if (productForm.deliveryMethodsAvailable.length === 0) {
+      setActionMessage('Select at least one delivery method.')
+      return
+    }
+    if (
+      productForm.deliveryMethodsAvailable.includes('BUYER_TO_SELLER') &&
+      (!productForm.pickupAddressRecipientName.trim() ||
+        !productForm.pickupAddressPhoneNumber.trim() ||
+        !productForm.pickupAddressLine.trim())
+    ) {
+      setActionMessage('Pickup recipient, phone number, and address are required for buyer pickup.')
       return
     }
 
@@ -435,6 +469,10 @@ export function useAdminController(useCases: AdminUseCases) {
     processingReportIds.length > 0 ||
     processingPayoutIds.length > 0
 
+  const handleRefreshToolData = useCallback(async () => {
+    await loadDashboardData()
+  }, [loadDashboardData])
+
   return {
     authScreenState,
     email,
@@ -488,6 +526,7 @@ export function useAdminController(useCases: AdminUseCases) {
     closeProductForm,
     handleSaveProduct,
     handleDeleteProduct,
-    handleModerateProduct
+    handleModerateProduct,
+    handleRefreshToolData
   }
 }

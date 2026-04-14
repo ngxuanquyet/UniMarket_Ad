@@ -32,6 +32,14 @@ const USD_TO_VND_RATE =
   Number(import.meta.env.VITE_USD_TO_VND_RATE) > 0
     ? Number(import.meta.env.VITE_USD_TO_VND_RATE)
     : DEFAULT_USD_TO_VND_RATE
+const PRODUCT_CATEGORIES = ['Electronics', 'Textbooks', 'Furniture', 'Clothing', 'Other'] as const
+const PRODUCT_CONDITIONS = ['New', 'Like New', 'Good', 'Fair'] as const
+const DELIVERY_METHODS = [
+  { value: 'DIRECT_MEET', label: 'Direct meet' },
+  { value: 'BUYER_TO_SELLER', label: 'Buyer pickup at seller address' },
+  { value: 'SELLER_TO_BUYER', label: 'Seller delivers to buyer' },
+  { value: 'SHIPPING', label: 'Shipping service' }
+] as const
 
 function formatWalletBalance(amount: number | null, currency: WalletCurrency): string {
   if (amount == null) return '--'
@@ -296,23 +304,44 @@ export function AdminAppView({ controller, themeMode, onToggleTheme }: Props) {
               </label>
               <label>
                 Category
-                <input
-                  type="text"
+                <select
                   value={controller.productForm.category}
                   onChange={(e) =>
                     controller.setProductForm((prev) => ({ ...prev, category: e.target.value }))
                   }
-                />
+                >
+                  <option value="">Select category</option>
+                  {PRODUCT_CATEGORIES.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                  {controller.productForm.category &&
+                  !PRODUCT_CATEGORIES.includes(
+                    controller.productForm.category as (typeof PRODUCT_CATEGORIES)[number]
+                  ) ? (
+                    <option value={controller.productForm.category}>
+                      {controller.productForm.category} (Current)
+                    </option>
+                  ) : null}
+                </select>
               </label>
               <label>
-                Image URL
-                <input
-                  type="url"
-                  value={controller.productForm.imageUrl}
+                Condition
+                <select
+                  value={controller.productForm.condition}
                   onChange={(e) =>
-                    controller.setProductForm((prev) => ({ ...prev, imageUrl: e.target.value }))
+                    controller.setProductForm((prev) => ({ ...prev, condition: e.target.value }))
                   }
-                />
+                  required
+                >
+                  <option value="">Select condition</option>
+                  {PRODUCT_CONDITIONS.map((condition) => (
+                    <option key={condition} value={condition}>
+                      {condition}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label className="full-row">
                 Description
@@ -324,6 +353,88 @@ export function AdminAppView({ controller, themeMode, onToggleTheme }: Props) {
                   }
                 />
               </label>
+              <label className="full-row">
+                Image URLs (one URL per line or comma separated)
+                <textarea
+                  rows={3}
+                  value={controller.productForm.imageUrlsText}
+                  onChange={(e) =>
+                    controller.setProductForm((prev) => ({
+                      ...prev,
+                      imageUrlsText: e.target.value
+                    }))
+                  }
+                  placeholder="https://.../image-1.jpg&#10;https://.../image-2.jpg"
+                />
+              </label>
+              <label className="full-row">
+                Delivery methods
+                <div className="delivery-methods-editor">
+                  {DELIVERY_METHODS.map((method) => (
+                    <label key={method.value} className="checkbox-inline">
+                      <input
+                        type="checkbox"
+                        checked={controller.productForm.deliveryMethodsAvailable.includes(method.value)}
+                        onChange={(event) =>
+                          controller.setProductForm((prev) => {
+                            const nextSet = new Set(prev.deliveryMethodsAvailable)
+                            if (event.target.checked) {
+                              nextSet.add(method.value)
+                            } else {
+                              nextSet.delete(method.value)
+                            }
+                            return { ...prev, deliveryMethodsAvailable: Array.from(nextSet) }
+                          })
+                        }
+                      />
+                      {method.label}
+                    </label>
+                  ))}
+                </div>
+              </label>
+              {controller.productForm.deliveryMethodsAvailable.includes('BUYER_TO_SELLER') ? (
+                <div className="full-row pickup-address-grid">
+                  <label>
+                    Pickup recipient name
+                    <input
+                      type="text"
+                      value={controller.productForm.pickupAddressRecipientName}
+                      onChange={(e) =>
+                        controller.setProductForm((prev) => ({
+                          ...prev,
+                          pickupAddressRecipientName: e.target.value
+                        }))
+                      }
+                    />
+                  </label>
+                  <label>
+                    Pickup phone number
+                    <input
+                      type="text"
+                      value={controller.productForm.pickupAddressPhoneNumber}
+                      onChange={(e) =>
+                        controller.setProductForm((prev) => ({
+                          ...prev,
+                          pickupAddressPhoneNumber: e.target.value
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="full-row">
+                    Pickup address line
+                    <input
+                      type="text"
+                      value={controller.productForm.pickupAddressLine}
+                      onChange={(e) =>
+                        controller.setProductForm((prev) => ({
+                          ...prev,
+                          pickupAddressLine: e.target.value
+                        }))
+                      }
+                    />
+                  </label>
+                </div>
+              ) : null}
               <label className="full-row">
                 Specifications
                 <div className="spec-editor">
@@ -467,18 +578,84 @@ function ContentSection({
   const [rejectReason, setRejectReason] = useState('')
   const [selectedDetailImageIndex, setSelectedDetailImageIndex] = useState(0)
   const [selectedPayoutForQr, setSelectedPayoutForQr] = useState<PayoutItem | null>(null)
+  const [productDateFrom, setProductDateFrom] = useState('')
+  const [productDateTo, setProductDateTo] = useState('')
+  const [productDateFromDraft, setProductDateFromDraft] = useState('')
+  const [productDateToDraft, setProductDateToDraft] = useState('')
+  const [productSortOrder, setProductSortOrder] = useState<'newest' | 'oldest'>('newest')
+  const [reportDateFrom, setReportDateFrom] = useState('')
+  const [reportDateTo, setReportDateTo] = useState('')
+  const [reportDateFromDraft, setReportDateFromDraft] = useState('')
+  const [reportDateToDraft, setReportDateToDraft] = useState('')
+  const [reportSortOrder, setReportSortOrder] = useState<'newest' | 'oldest'>('newest')
+  const [payoutDateFrom, setPayoutDateFrom] = useState('')
+  const [payoutDateTo, setPayoutDateTo] = useState('')
+  const [payoutDateFromDraft, setPayoutDateFromDraft] = useState('')
+  const [payoutDateToDraft, setPayoutDateToDraft] = useState('')
+  const [payoutSortOrder, setPayoutSortOrder] = useState<'newest' | 'oldest'>('newest')
 
-  const moderationRows = controller.productResults.filter((item) => {
+  const isInDateRange = (value: number, fromDate: string, toDate: string): boolean => {
+    const hasFrom = fromDate.trim().length > 0
+    const hasTo = toDate.trim().length > 0
+    if (!hasFrom && !hasTo) return true
+    if (!Number.isFinite(value) || value <= 0) return false
+
+    if (hasFrom) {
+      const from = new Date(`${fromDate}T00:00:00`).getTime()
+      if (Number.isFinite(from) && value < from) return false
+    }
+
+    if (hasTo) {
+      const to = new Date(`${toDate}T23:59:59.999`).getTime()
+      if (Number.isFinite(to) && value > to) return false
+    }
+
+    return true
+  }
+
+  const filteredProductRows = controller.productResults.filter((item) =>
+    isInDateRange(item.createdAt, productDateFrom, productDateTo)
+  )
+  const filteredReportRows = controller.reportResults.filter((item) =>
+    isInDateRange(item.createdAt, reportDateFrom, reportDateTo)
+  )
+  const filteredPayoutRows = controller.payoutResults.filter((item) =>
+    isInDateRange(item.createdAt, payoutDateFrom, payoutDateTo)
+  )
+
+  const sortedProductRows = [...filteredProductRows].sort((a, b) =>
+    productSortOrder === 'newest' ? b.createdAt - a.createdAt : a.createdAt - b.createdAt
+  )
+  const sortedReportRows = [...filteredReportRows].sort((a, b) =>
+    reportSortOrder === 'newest' ? b.createdAt - a.createdAt : a.createdAt - b.createdAt
+  )
+  const sortedPayoutRows = [...filteredPayoutRows].sort((a, b) =>
+    payoutSortOrder === 'newest' ? b.createdAt - a.createdAt : a.createdAt - b.createdAt
+  )
+
+  const applyDateRange = (
+    fromDraft: string,
+    toDraft: string,
+    apply: (from: string, to: string) => void
+  ) => {
+    if (fromDraft && toDraft && fromDraft > toDraft) {
+      controller.setActionMessage('"From" date must be earlier than or equal to "To" date.')
+      return
+    }
+    apply(fromDraft, toDraft)
+  }
+
+  const moderationRows = sortedProductRows.filter((item) => {
     if (moderationFilter === 'ALL') return true
     return item.moderationStatus === moderationFilter
   })
 
   const moderationCounts = {
-    ALL: controller.productResults.length,
-    PENDING: controller.productResults.filter((item) => item.moderationStatus === 'PENDING').length,
-    APPROVED: controller.productResults.filter((item) => item.moderationStatus === 'APPROVED').length,
-    REJECTED: controller.productResults.filter((item) => item.moderationStatus === 'REJECTED').length,
-    DISABLED: controller.productResults.filter((item) => item.moderationStatus === 'DISABLED').length
+    ALL: filteredProductRows.length,
+    PENDING: filteredProductRows.filter((item) => item.moderationStatus === 'PENDING').length,
+    APPROVED: filteredProductRows.filter((item) => item.moderationStatus === 'APPROVED').length,
+    REJECTED: filteredProductRows.filter((item) => item.moderationStatus === 'REJECTED').length,
+    DISABLED: filteredProductRows.filter((item) => item.moderationStatus === 'DISABLED').length
   }
 
   const handleOpenReject = (item: ProductItem) => {
@@ -542,10 +719,202 @@ function ContentSection({
     </div>
   ) : null
 
+  const refreshButton = (
+    <button
+      type="button"
+      className="secondary-btn"
+      onClick={() => void controller.handleRefreshToolData()}
+      disabled={controller.isDashboardLoading}
+    >
+      {controller.isDashboardLoading ? 'Refreshing...' : 'Refresh'}
+    </button>
+  )
+
+  const productTimeFilter = (
+    <div className="time-filter-bar">
+      <label className="time-filter-field">
+        From
+        <input
+          type="date"
+          className="time-filter-input"
+          value={productDateFromDraft}
+          onChange={(event) => setProductDateFromDraft(event.target.value)}
+        />
+      </label>
+      <label className="time-filter-field">
+        To
+        <input
+          type="date"
+          className="time-filter-input"
+          value={productDateToDraft}
+          onChange={(event) => setProductDateToDraft(event.target.value)}
+        />
+      </label>
+      <label className="time-filter-field">
+        Sort
+        <select
+          className="time-filter-input"
+          value={productSortOrder}
+          onChange={(event) => setProductSortOrder(event.target.value as 'newest' | 'oldest')}
+        >
+          <option value="newest">Newest</option>
+          <option value="oldest">Oldest</option>
+        </select>
+      </label>
+      <button
+        type="button"
+        className="action-btn"
+        onClick={() =>
+          applyDateRange(productDateFromDraft, productDateToDraft, (from, to) => {
+            setProductDateFrom(from)
+            setProductDateTo(to)
+          })
+        }
+        disabled={productDateFromDraft === productDateFrom && productDateToDraft === productDateTo}
+      >
+        Apply
+      </button>
+      <button
+        type="button"
+        className="secondary-btn"
+        onClick={() => {
+          setProductDateFrom('')
+          setProductDateTo('')
+          setProductDateFromDraft('')
+          setProductDateToDraft('')
+        }}
+      >
+        Clear time
+      </button>
+    </div>
+  )
+
+  const reportTimeFilter = (
+    <div className="time-filter-bar">
+      <label className="time-filter-field">
+        From
+        <input
+          type="date"
+          className="time-filter-input"
+          value={reportDateFromDraft}
+          onChange={(event) => setReportDateFromDraft(event.target.value)}
+        />
+      </label>
+      <label className="time-filter-field">
+        To
+        <input
+          type="date"
+          className="time-filter-input"
+          value={reportDateToDraft}
+          onChange={(event) => setReportDateToDraft(event.target.value)}
+        />
+      </label>
+      <label className="time-filter-field">
+        Sort
+        <select
+          className="time-filter-input"
+          value={reportSortOrder}
+          onChange={(event) => setReportSortOrder(event.target.value as 'newest' | 'oldest')}
+        >
+          <option value="newest">Newest</option>
+          <option value="oldest">Oldest</option>
+        </select>
+      </label>
+      <button
+        type="button"
+        className="action-btn"
+        onClick={() =>
+          applyDateRange(reportDateFromDraft, reportDateToDraft, (from, to) => {
+            setReportDateFrom(from)
+            setReportDateTo(to)
+          })
+        }
+        disabled={reportDateFromDraft === reportDateFrom && reportDateToDraft === reportDateTo}
+      >
+        Apply
+      </button>
+      <button
+        type="button"
+        className="secondary-btn"
+        onClick={() => {
+          setReportDateFrom('')
+          setReportDateTo('')
+          setReportDateFromDraft('')
+          setReportDateToDraft('')
+        }}
+      >
+        Clear time
+      </button>
+    </div>
+  )
+
+  const payoutTimeFilter = (
+    <div className="time-filter-bar">
+      <label className="time-filter-field">
+        From
+        <input
+          type="date"
+          className="time-filter-input"
+          value={payoutDateFromDraft}
+          onChange={(event) => setPayoutDateFromDraft(event.target.value)}
+        />
+      </label>
+      <label className="time-filter-field">
+        To
+        <input
+          type="date"
+          className="time-filter-input"
+          value={payoutDateToDraft}
+          onChange={(event) => setPayoutDateToDraft(event.target.value)}
+        />
+      </label>
+      <label className="time-filter-field">
+        Sort
+        <select
+          className="time-filter-input"
+          value={payoutSortOrder}
+          onChange={(event) => setPayoutSortOrder(event.target.value as 'newest' | 'oldest')}
+        >
+          <option value="newest">Newest</option>
+          <option value="oldest">Oldest</option>
+        </select>
+      </label>
+      <button
+        type="button"
+        className="action-btn"
+        onClick={() =>
+          applyDateRange(payoutDateFromDraft, payoutDateToDraft, (from, to) => {
+            setPayoutDateFrom(from)
+            setPayoutDateTo(to)
+          })
+        }
+        disabled={payoutDateFromDraft === payoutDateFrom && payoutDateToDraft === payoutDateTo}
+      >
+        Apply
+      </button>
+      <button
+        type="button"
+        className="secondary-btn"
+        onClick={() => {
+          setPayoutDateFrom('')
+          setPayoutDateTo('')
+          setPayoutDateFromDraft('')
+          setPayoutDateToDraft('')
+        }}
+      >
+        Clear time
+      </button>
+    </div>
+  )
+
   switch (controller.activeScreen) {
     case 'dashboard':
       return (
         <>
+          <div className="panel-top tool-header">
+            <h3>Dashboard</h3>
+            {refreshButton}
+          </div>
           <section className="stats-grid">
             <article className="stat-card">
               <p>Total Users</p>
@@ -619,17 +988,20 @@ function ContentSection({
         <article className="panel">
           <div className="panel-top">
             <h3>User Management</h3>
-            <label className="wallet-currency-wrap">
-              Currency
-              <select
-                className="wallet-currency-select"
-                value={walletCurrency}
-                onChange={(e) => setWalletCurrency(e.target.value as WalletCurrency)}
-              >
-                <option value="USD">$ (USD, 1$ = {USD_TO_VND_RATE.toLocaleString('vi-VN')}đ)</option>
-                <option value="VND">VND (₫)</option>
-              </select>
-            </label>
+            <div className="panel-actions">
+              <label className="wallet-currency-wrap">
+                Currency
+                <select
+                  className="wallet-currency-select"
+                  value={walletCurrency}
+                  onChange={(e) => setWalletCurrency(e.target.value as WalletCurrency)}
+                >
+                  <option value="USD">$ (USD, 1$ = {USD_TO_VND_RATE.toLocaleString('vi-VN')}đ)</option>
+                  <option value="VND">VND (₫)</option>
+                </select>
+              </label>
+              {refreshButton}
+            </div>
           </div>
           <div className="table-wrap">
             <table>
@@ -738,6 +1110,7 @@ function ContentSection({
                 <p className="panel-note">Product ID: {detail.id}</p>
               </div>
               <div className="actions-cell">
+                {refreshButton}
                 {detail.moderationStatus === 'PENDING' ? (
                   <>
                     <button
@@ -833,7 +1206,22 @@ function ContentSection({
                   <strong>Category:</strong> {detail.category || '-'}
                 </p>
                 <p>
-                  <strong>Created:</strong> {formatDateTime(detail.createdAt)}
+                  <strong>Condition:</strong> {detail.condition || '-'}
+                </p>
+                <p>
+                  <strong>Delivery methods:</strong>{' '}
+                  {detail.deliveryMethodsAvailable.length > 0
+                    ? detail.deliveryMethodsAvailable.join(', ')
+                    : '-'}
+                </p>
+                <p>
+                  <strong>Pickup address:</strong>{' '}
+                  {detail.sellerPickupAddress
+                    ? `${detail.sellerPickupAddress.recipientName} | ${detail.sellerPickupAddress.phoneNumber} | ${detail.sellerPickupAddress.addressLine}`
+                    : '-'}
+                </p>
+                <p>
+                  <strong>Posted:</strong> {formatDateTime(detail.createdAt)}
                 </p>
                 <div className="product-detail-section">
                   <p>
@@ -867,11 +1255,15 @@ function ContentSection({
         <article className="panel">
           <div className="panel-top">
             <h3>Product Moderation</h3>
-            <button className="action-btn" onClick={controller.openCreateProductForm}>
-              Add Product
-            </button>
+            <div className="panel-actions">
+              {refreshButton}
+              <button className="action-btn" onClick={controller.openCreateProductForm}>
+                Add Product
+              </button>
+            </div>
           </div>
           <section className="moderation-tools">
+            {productTimeFilter}
             <p className="panel-note">Review pending products, approve to publish, reject with violation reason.</p>
             <div className="moderation-filters">
               {(['PENDING', 'APPROVED', 'REJECTED', 'DISABLED', 'ALL'] as const).map((filterKey) => (
@@ -1018,8 +1410,12 @@ function ContentSection({
     case 'reports':
       return (
         <article className="panel">
-          <h3>Reported Content</h3>
-          <ReportsTable controller={controller} rows={controller.reportResults} />
+          <div className="panel-top">
+            <h3>Reported Content</h3>
+            {refreshButton}
+          </div>
+          {reportTimeFilter}
+          <ReportsTable controller={controller} rows={sortedReportRows} />
         </article>
       )
 
@@ -1027,9 +1423,13 @@ function ContentSection({
       return (
         <>
           <article className="panel">
-            <h3>Payout Requests</h3>
+            <div className="panel-top">
+              <h3>Payout Requests</h3>
+              {refreshButton}
+            </div>
+            {payoutTimeFilter}
             <ul className="payout-list">
-              {controller.payoutResults.map((item) => (
+              {sortedPayoutRows.map((item) => (
                 <li key={item.id}>
                   <div>
                     <p>{item.seller}</p>
@@ -1057,7 +1457,7 @@ function ContentSection({
                   </div>
                 </li>
               ))}
-              {controller.payoutResults.length === 0 ? (
+              {sortedPayoutRows.length === 0 ? (
                 <li className="empty-payout">No payout requests.</li>
               ) : null}
             </ul>
@@ -1069,7 +1469,10 @@ function ContentSection({
     case 'settings':
       return (
         <article className="panel">
-          <h3>Settings</h3>
+          <div className="panel-top">
+            <h3>Settings</h3>
+            {refreshButton}
+          </div>
           <p className="panel-note">Dashboard settings will be configured here.</p>
         </article>
       )

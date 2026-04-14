@@ -405,6 +405,18 @@ body,
   margin-bottom: 10px;
 }
 
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.tool-header h3 {
+  margin-bottom: 0;
+}
+
 .product-detail-page > .panel-top {
   align-items: flex-start;
 }
@@ -581,6 +593,32 @@ th {
 
 .moderation-tools {
   margin: 2px 0 12px;
+}
+
+.time-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.time-filter-field {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.time-filter-input {
+  border: 1px solid var(--input-border);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--input-ink);
+  padding: 6px 8px;
+  font-size: 0.88rem;
+  font-weight: 700;
 }
 
 .moderation-filters {
@@ -869,6 +907,26 @@ th {
   grid-column: 1 / -1;
 }
 
+.checkbox-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.delivery-methods-editor {
+  display: grid;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.pickup-address-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .spec-editor {
   display: grid;
   gap: 8px;
@@ -931,6 +989,10 @@ th {
     align-items: stretch;
   }
 
+  .time-filter-bar {
+    align-items: stretch;
+  }
+
   .product-detail-grid {
     grid-template-columns: 1fr;
   }
@@ -940,6 +1002,10 @@ th {
   }
 
   .spec-row {
+    grid-template-columns: 1fr;
+  }
+
+  .pickup-address-grid {
     grid-template-columns: 1fr;
   }
 }

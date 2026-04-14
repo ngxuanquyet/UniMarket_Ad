@@ -88,6 +88,51 @@ function toStringRecord(value: unknown): Record<string, string> {
   )
 }
 
+function toStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => toStringOrEmpty(item))
+    .filter((item) => item.length > 0)
+}
+
+function toProductCategory(data: Record<string, unknown>): string {
+  const directCategory = toStringOrEmpty(data.category)
+  if (directCategory) return directCategory
+
+  const categoryName = toStringOrEmpty(data.categoryName)
+  if (categoryName) return categoryName
+
+  const categoryId = toStringOrEmpty(data.categoryId)
+  if (categoryId) return categoryId
+
+  return ''
+}
+
+function toSellerPickupAddress(
+  value: unknown
+): {
+  id: string
+  recipientName: string
+  phoneNumber: string
+  addressLine: string
+  isDefault: boolean
+} | null {
+  if (!value || typeof value !== 'object') return null
+  const map = value as Record<string, unknown>
+  const recipientName = toStringOrEmpty(map.recipientName)
+  const phoneNumber = toStringOrEmpty(map.phoneNumber)
+  const addressLine = toStringOrEmpty(map.addressLine)
+  if (!recipientName && !phoneNumber && !addressLine) return null
+
+  return {
+    id: toStringOrEmpty(map.id),
+    recipientName,
+    phoneNumber,
+    addressLine,
+    isDefault: map.isDefault === true
+  }
+}
+
 function maskSuffix(value: string): string {
   const trimmed = value.trim()
   if (trimmed.length <= 4) return trimmed
@@ -230,12 +275,17 @@ export class FirebaseAdminRepository implements AdminRepository {
       const imageUrls = Array.isArray(data.imageUrls)
         ? data.imageUrls.filter((item): item is string => typeof item === 'string')
         : []
+      const fallbackImageUrl = toStringOrEmpty(data.imageUrl)
+      const normalizedImageUrls =
+        imageUrls.length > 0 ? imageUrls : fallbackImageUrl ? [fallbackImageUrl] : []
       const quantityAvailable =
         typeof data.quantityAvailable === 'number'
           ? data.quantityAvailable
           : typeof data.quantity === 'number'
             ? data.quantity
             : null
+      const createdAt = toMillis(data.createdAt)
+      const postedAt = toMillis(data.postedAt)
 
       return {
         id: productDoc.id,
@@ -252,13 +302,13 @@ export class FirebaseAdminRepository implements AdminRepository {
           (typeof data.description === 'string' && data.description.trim()) ||
           (typeof data.productDetail === 'string' && data.productDetail.trim()) ||
           '',
-        category:
-          (typeof data.category === 'string' && data.category.trim()) ||
-          (typeof data.categoryName === 'string' && data.categoryName.trim()) ||
-          '',
-        createdAt: toMillis(data.createdAt),
-        imageUrls,
-        specifications: toStringRecord(data.specifications)
+        category: toProductCategory(data as Record<string, unknown>),
+        condition: toStringOrEmpty(data.condition),
+        createdAt: postedAt || createdAt,
+        imageUrls: normalizedImageUrls,
+        specifications: toStringRecord(data.specifications),
+        deliveryMethodsAvailable: toStringList(data.deliveryMethodsAvailable),
+        sellerPickupAddress: toSellerPickupAddress(data.sellerPickupAddress)
       }
     })
 
@@ -433,16 +483,41 @@ export class FirebaseAdminRepository implements AdminRepository {
     const status = (input.form.moderationStatus.trim() || 'PENDING').toUpperCase()
     const description = input.form.description.trim()
     const category = input.form.category.trim()
-    const imageUrl = input.form.imageUrl.trim()
+    const condition = input.form.condition.trim()
     const specifications = parseSpecificationsRows(input.form.specifications)
     const price = toNumberOrNull(input.form.price.trim())
     const quantityAvailable = toNumberOrNull(input.form.quantityAvailable.trim())
+    const imageUrls = input.form.imageUrlsText
+      .split(/\r?\n|,/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+    const deliveryMethodsAvailable = input.form.deliveryMethodsAvailable
+      .map((item) => item.trim().toUpperCase())
+      .filter(Boolean)
+    const isBuyerPickupEnabled = deliveryMethodsAvailable.includes('BUYER_TO_SELLER')
+    const pickupAddressRecipientName = input.form.pickupAddressRecipientName.trim()
+    const pickupAddressPhoneNumber = input.form.pickupAddressPhoneNumber.trim()
+    const pickupAddressLine = input.form.pickupAddressLine.trim()
+    const sellerPickupAddress =
+      isBuyerPickupEnabled && (pickupAddressRecipientName || pickupAddressPhoneNumber || pickupAddressLine)
+        ? {
+            id: '',
+            recipientName: pickupAddressRecipientName,
+            phoneNumber: pickupAddressPhoneNumber,
+            addressLine: pickupAddressLine,
+            isDefault: false
+          }
+        : null
 
     const payload: Record<string, unknown> = {
       name,
       userId: sellerId,
       sellerId,
       sellerName: input.form.sellerName.trim(),
+      rating: 0,
+      location: 'Unknown',
+      timeAgo: '',
+      isFavorite: false,
       moderationStatus: status,
       status,
       isVisible: status === 'APPROVED',
@@ -450,16 +525,21 @@ export class FirebaseAdminRepository implements AdminRepository {
       specifications,
       category,
       categoryName: category,
+      categoryId: category,
+      condition,
+      deliveryMethodsAvailable,
+      sellerPickupAddress,
       updatedAt: serverTimestamp()
     }
 
     if (price != null) payload.price = price
     if (quantityAvailable != null) payload.quantityAvailable = quantityAvailable
-    if (imageUrl) payload.imageUrls = [imageUrl]
+    if (imageUrls.length > 0) payload.imageUrls = imageUrls
 
     let id = input.productId ?? ''
     if (input.mode === 'create') {
       payload.createdAt = serverTimestamp()
+      payload.postedAt = serverTimestamp()
       const created = await addDoc(collection(db, 'products'), payload)
       id = created.id
     } else {
@@ -480,9 +560,12 @@ export class FirebaseAdminRepository implements AdminRepository {
       quantityAvailable,
       description,
       category,
+      condition,
       createdAt: Date.now(),
-      imageUrls: imageUrl ? [imageUrl] : [],
-      specifications
+      imageUrls,
+      specifications,
+      deliveryMethodsAvailable,
+      sellerPickupAddress
     }
   }
 
@@ -594,6 +677,7 @@ export class FirebaseAdminRepository implements AdminRepository {
             seller,
             amount: toPayoutMoney(amount),
             amountValue: amount,
+            createdAt: toMillis(data.createdAt),
             status,
             receiverAccount,
             receiverMethodType,
