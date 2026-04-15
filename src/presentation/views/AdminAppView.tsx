@@ -59,6 +59,24 @@ function formatWalletBalance(amount: number | null, currency: WalletCurrency): s
   })
 }
 
+function formatPriceFromVnd(amount: number | null, currency: WalletCurrency): string {
+  if (amount == null) return '--'
+  if (currency === 'VND') {
+    return amount.toLocaleString('vi-VN', {
+      style: 'currency',
+      currency: 'VND',
+      maximumFractionDigits: 0
+    })
+  }
+  const usdAmount = amount / USD_TO_VND_RATE
+  return usdAmount.toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  })
+}
+
 function buildPayoutQrUrl(payout: PayoutItem): string | null {
   if (payout.receiverMethodType.toUpperCase() !== 'BANK_TRANSFER') return null
   const bankCode = payout.receiverBankCode.trim().toUpperCase()
@@ -583,6 +601,7 @@ function ContentSection({
   const [productDateFromDraft, setProductDateFromDraft] = useState('')
   const [productDateToDraft, setProductDateToDraft] = useState('')
   const [productSortOrder, setProductSortOrder] = useState<'newest' | 'oldest'>('newest')
+  const [productPriceCurrency, setProductPriceCurrency] = useState<WalletCurrency>('VND')
   const [reportDateFrom, setReportDateFrom] = useState('')
   const [reportDateTo, setReportDateTo] = useState('')
   const [reportDateFromDraft, setReportDateFromDraft] = useState('')
@@ -1196,7 +1215,7 @@ function ContentSection({
                   <strong>Seller:</strong> {detail.sellerName}
                 </p>
                 <p>
-                  <strong>Price:</strong> {detail.price == null ? '-' : detail.price}
+                  <strong>Price:</strong> {formatPriceFromVnd(detail.price, productPriceCurrency)}
                 </p>
                 <p>
                   <strong>Quantity:</strong>{' '}
@@ -1264,6 +1283,19 @@ function ContentSection({
           </div>
           <section className="moderation-tools">
             {productTimeFilter}
+            <div className="moderation-toolbar-row">
+              <label className="wallet-currency-wrap">
+                Price currency
+                <select
+                  className="wallet-currency-select"
+                  value={productPriceCurrency}
+                  onChange={(e) => setProductPriceCurrency(e.target.value as WalletCurrency)}
+                >
+                  <option value="VND">VND (₫)</option>
+                  <option value="USD">$ (USD, 1$ = {USD_TO_VND_RATE.toLocaleString('vi-VN')}đ)</option>
+                </select>
+              </label>
+            </div>
             <p className="panel-note">Review pending products, approve to publish, reject with violation reason.</p>
             <div className="moderation-filters">
               {(['PENDING', 'APPROVED', 'REJECTED', 'DISABLED', 'ALL'] as const).map((filterKey) => (
@@ -1284,6 +1316,7 @@ function ContentSection({
                 <tr>
                   <th>Product ID</th>
                   <th>Name</th>
+                  <th>Price ({productPriceCurrency})</th>
                   <th>Seller ID</th>
                   <th>Seller</th>
                   <th>Status</th>
@@ -1295,6 +1328,7 @@ function ContentSection({
                   <tr key={item.id}>
                     <td>{item.id}</td>
                     <td>{item.name}</td>
+                    <td>{formatPriceFromVnd(item.price, productPriceCurrency)}</td>
                     <td>{item.sellerId || '-'}</td>
                     <td>{item.sellerName}</td>
                     <td>
@@ -1359,7 +1393,7 @@ function ContentSection({
                 ))}
                 {moderationRows.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="empty-cell">
+                    <td colSpan={7} className="empty-cell">
                       {moderationFilter === 'ALL'
                         ? 'No products found.'
                         : `No ${moderationFilter.toLowerCase()} products.`}
