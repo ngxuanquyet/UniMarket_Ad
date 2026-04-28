@@ -3,6 +3,7 @@ export type ReportStatus = 'Pending' | 'Resolved'
 export type ScreenKey =
   | 'dashboard'
   | 'users'
+  | 'orders'
   | 'products'
   | 'reports'
   | 'payouts'
@@ -38,9 +39,65 @@ export type UserItem = {
   id: string
   name: string
   email: string
+  phoneNumber: string
   avatarUrl: string
+  university: string
+  studentId: string
   walletBalance: number | null
+  boughtCount: number | null
+  soldCount: number | null
+  averageRating: number | null
+  ratingCount: number | null
   isLocked: boolean
+}
+
+export type OrderAddress = {
+  id: string
+  recipientName: string
+  phoneNumber: string
+  addressLine: string
+  isDefault: boolean
+}
+
+export type OrderPaymentMethodDetails = {
+  type: string
+  label: string
+  accountName: string
+  accountNumber: string
+  bankCode: string
+  bankName: string
+  phoneNumber: string
+  note: string
+}
+
+export type OrderItem = {
+  id: string
+  buyerId: string
+  buyerName: string
+  buyerPhoneNumber: string
+  sellerId: string
+  sellerName: string
+  sellerPhoneNumber: string
+  productId: string
+  productName: string
+  productDetail: string
+  productImageUrl: string
+  quantity: number
+  unitPrice: number
+  totalAmount: number
+  deliveryMethod: string
+  paymentMethod: string
+  paymentMethodDetails: OrderPaymentMethodDetails | null
+  meetingPoint: string
+  buyerAddress: OrderAddress | null
+  sellerAddress: OrderAddress | null
+  transferContent: string
+  paymentExpiresAt: number
+  paymentConfirmedAt: number
+  status: string
+  statusLabel: string
+  createdAt: number
+  updatedAt: number
 }
 
 export type ProductItem = {
@@ -131,6 +188,7 @@ export type DashboardData = {
   reports: ReportItem[]
   payouts: PayoutItem[]
   users: UserItem[]
+  orders: OrderItem[]
   products: ProductItem[]
 }
 

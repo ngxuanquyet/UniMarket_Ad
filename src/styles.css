@@ -562,16 +562,6 @@ th {
   background: linear-gradient(145deg, #1a75ff, #0e4db7);
 }
 
-.avatar-url-link {
-  color: var(--link);
-  text-decoration: none;
-  overflow-wrap: anywhere;
-}
-
-.avatar-url-link:hover {
-  text-decoration: underline;
-}
-
 .wallet-currency-wrap {
   display: inline-flex;
   align-items: center;

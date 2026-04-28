@@ -2,6 +2,7 @@ import { Dispatch, FormEvent, SetStateAction, useCallback, useEffect, useMemo, u
 import { AdminUseCases } from '../../application/usecases/AdminUseCases'
 import {
   AuthScreenState,
+  OrderItem,
   PayoutItem,
   ProductModerationAction,
   ProductFormMode,
@@ -29,6 +30,7 @@ export function useAdminController(useCases: AdminUseCases) {
   const [reports, setReports] = useState<ReportItem[]>([])
   const [payouts, setPayouts] = useState<PayoutItem[]>([])
   const [users, setUsers] = useState<UserItem[]>([])
+  const [orders, setOrders] = useState<OrderItem[]>([])
   const [products, setProducts] = useState<ProductItem[]>([])
 
   const [isDashboardLoading, setIsDashboardLoading] = useState(false)
@@ -37,6 +39,8 @@ export function useAdminController(useCases: AdminUseCases) {
 
   const [activeScreen, setActiveScreen] = useState<ScreenKey>('dashboard')
   const [searchTerm, setSearchTerm] = useState('')
+  const [selectedUser, setSelectedUser] = useState<UserItem | null>(null)
+  const [selectedOrder, setSelectedOrder] = useState<OrderItem | null>(null)
   const [selectedProduct, setSelectedProduct] = useState<ProductItem | null>(null)
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null)
   const [processingUserIds, setProcessingUserIds] = useState<string[]>([])
@@ -58,6 +62,7 @@ export function useAdminController(useCases: AdminUseCases) {
       setReports(data.reports)
       setPayouts(data.payouts)
       setUsers(data.users)
+      setOrders(data.orders)
       setProducts(data.products)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to load dashboard data.'
@@ -66,6 +71,7 @@ export function useAdminController(useCases: AdminUseCases) {
       setReports([])
       setPayouts([])
       setUsers([])
+      setOrders([])
       setProducts([])
     } finally {
       setIsDashboardLoading(false)
@@ -115,6 +121,30 @@ export function useAdminController(useCases: AdminUseCases) {
       void loadDashboardData()
     }
   }, [authScreenState, loadDashboardData])
+
+  useEffect(() => {
+    if (!selectedUser) return
+    const latestSelected = users.find((item) => item.id === selectedUser.id) ?? null
+    if (!latestSelected) {
+      setSelectedUser(null)
+      return
+    }
+    if (latestSelected !== selectedUser) {
+      setSelectedUser(latestSelected)
+    }
+  }, [users, selectedUser])
+
+  useEffect(() => {
+    if (!selectedOrder) return
+    const latestSelected = orders.find((item) => item.id === selectedOrder.id) ?? null
+    if (!latestSelected) {
+      setSelectedOrder(null)
+      return
+    }
+    if (latestSelected !== selectedOrder) {
+      setSelectedOrder(latestSelected)
+    }
+  }, [orders, selectedOrder])
 
   useEffect(() => {
     if (!selectedProduct) return
@@ -436,12 +466,17 @@ export function useAdminController(useCases: AdminUseCases) {
 
   const userResults = useMemo(() => {
     const keyword = searchTerm.trim().toLowerCase()
+    const phoneKeyword = searchTerm.replace(/\D/g, '')
     if (!keyword) return users
-    return users.filter((item) =>
-      `${item.id} ${item.name} ${item.email} ${item.avatarUrl} ${item.walletBalance ?? ''}`
+    return users.filter((item) => {
+      const matchesText = `${item.id} ${item.name} ${item.email} ${item.phoneNumber} ${item.university} ${item.studentId} ${item.walletBalance ?? ''}`
         .toLowerCase()
         .includes(keyword)
-    )
+      const matchesPhone =
+        phoneKeyword.length > 0 && item.phoneNumber.replace(/\D/g, '').includes(phoneKeyword)
+
+      return matchesText || matchesPhone
+    })
   }, [users, searchTerm])
 
   const productResults = useMemo(() => {
@@ -453,6 +488,29 @@ export function useAdminController(useCases: AdminUseCases) {
         .includes(keyword)
     )
   }, [products, searchTerm])
+
+  const orderResults = useMemo(() => {
+    const keyword = searchTerm.trim().toLowerCase()
+    const phoneKeyword = searchTerm.replace(/\D/g, '')
+    if (!keyword) return orders
+    return orders.filter((item) => {
+      const addressPhones = [
+        item.buyerPhoneNumber,
+        item.sellerPhoneNumber,
+        item.buyerAddress?.phoneNumber ?? '',
+        item.sellerAddress?.phoneNumber ?? '',
+        item.paymentMethodDetails?.phoneNumber ?? ''
+      ].join(' ')
+      const matchesText =
+        `${item.id} ${item.buyerId} ${item.buyerName} ${item.sellerId} ${item.sellerName} ${item.productId} ${item.productName} ${item.status} ${item.statusLabel} ${item.deliveryMethod} ${item.paymentMethod} ${addressPhones}`
+          .toLowerCase()
+          .includes(keyword)
+      const matchesPhone =
+        phoneKeyword.length > 0 && addressPhones.replace(/\D/g, '').includes(phoneKeyword)
+
+      return matchesText || matchesPhone
+    })
+  }, [orders, searchTerm])
 
   const payoutResults = useMemo(() => {
     const keyword = searchTerm.trim().toLowerCase()
@@ -485,6 +543,7 @@ export function useAdminController(useCases: AdminUseCases) {
     reports,
     payouts,
     users,
+    orders,
     products,
     isDashboardLoading,
     dashboardError,
@@ -492,6 +551,8 @@ export function useAdminController(useCases: AdminUseCases) {
     activeScreen,
     searchTerm,
     selectedReport,
+    selectedUser,
+    selectedOrder,
     selectedProduct,
     processingUserIds,
     processingProductIds,
@@ -504,6 +565,7 @@ export function useAdminController(useCases: AdminUseCases) {
     productForm,
     reportResults,
     userResults,
+    orderResults,
     productResults,
     payoutResults,
     setEmail,
@@ -512,6 +574,8 @@ export function useAdminController(useCases: AdminUseCases) {
     setActionMessage,
     setActiveScreen,
     setSearchTerm,
+    setSelectedUser,
+    setSelectedOrder,
     setSelectedProduct,
     setSelectedReportId,
     setProductForm: setProductForm as Dispatch<SetStateAction<ProductFormState>>,

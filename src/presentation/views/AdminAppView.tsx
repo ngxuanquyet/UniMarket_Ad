@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { AdminController } from '../controllers/useAdminController'
-import { PayoutItem, ProductItem, ScreenKey } from '../../domain/entities/admin'
+import { OrderItem, PayoutItem, ProductItem, ScreenKey } from '../../domain/entities/admin'
 import { formatDateTime, toMoney } from '../utils/format'
 
 type Props = {
@@ -12,6 +12,7 @@ type Props = {
 const menuItems: Array<{ key: ScreenKey; label: string }> = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'users', label: 'User Management' },
+  { key: 'orders', label: 'Order Management' },
   { key: 'products', label: 'Product Moderation' },
   { key: 'reports', label: 'Reported Content' },
   { key: 'payouts', label: 'Payout Requests' },
@@ -26,6 +27,17 @@ function getDisplayInitial(name: string): string {
 
 type WalletCurrency = 'USD' | 'VND'
 type ModerationFilter = 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'DISABLED'
+type OrderStatusFilter =
+  | 'ALL'
+  | 'WAITING_PAYMENT'
+  | 'WAITING_CONFIRMATION'
+  | 'WAITING_PICKUP'
+  | 'SHIPPING'
+  | 'IN_TRANSIT'
+  | 'OUT_FOR_DELIVERY'
+  | 'DELIVERED'
+  | 'CANCELLED'
+  | 'UNKNOWN'
 const DEFAULT_USD_TO_VND_RATE = 26000
 const USD_TO_VND_RATE =
   Number.isFinite(Number(import.meta.env.VITE_USD_TO_VND_RATE)) &&
@@ -93,6 +105,20 @@ function buildPayoutQrUrl(payout: PayoutItem): string | null {
   }
 
   return `https://img.vietqr.io/image/${encodeURIComponent(bankCode)}-${encodeURIComponent(accountNumber)}-compact2.png?${params.toString()}`
+}
+
+function formatOrderAddress(address: OrderItem['buyerAddress']): string {
+  if (!address) return '-'
+  return [address.recipientName, address.phoneNumber, address.addressLine].filter(Boolean).join(' | ') || '-'
+}
+
+function formatOrderPaymentDetails(order: OrderItem): string {
+  const details = order.paymentMethodDetails
+  if (!details) return order.paymentMethod || '-'
+  const label = details.label || details.type || order.paymentMethod
+  const bank = [details.bankName, details.accountName, details.accountNumber].filter(Boolean).join(' | ')
+  const phone = details.phoneNumber ? `Phone: ${details.phoneNumber}` : ''
+  return [label, bank, phone].filter(Boolean).join(' | ') || '-'
 }
 
 export function AdminAppView({ controller, themeMode, onToggleTheme }: Props) {
@@ -167,6 +193,8 @@ export function AdminAppView({ controller, themeMode, onToggleTheme }: Props) {
     )
   }
 
+  const selectedUser = controller.selectedUser
+
   return (
     <main className="page dashboard-page">
       <aside className="sidebar">
@@ -202,7 +230,9 @@ export function AdminAppView({ controller, themeMode, onToggleTheme }: Props) {
               className="search"
               placeholder={
                 controller.activeScreen === 'users'
-                  ? 'Search by name, user ID, email'
+                  ? 'Search by name, user ID, email, phone number'
+                  : controller.activeScreen === 'orders'
+                    ? 'Search by order ID, buyer, seller, product, phone'
                   : controller.activeScreen === 'products'
                     ? 'Search by name, product ID, seller ID'
                     : 'Search'
@@ -534,6 +564,71 @@ export function AdminAppView({ controller, themeMode, onToggleTheme }: Props) {
         </div>
       ) : null}
 
+      {selectedUser ? (
+        <div className="modal-backdrop" onClick={() => controller.setSelectedUser(null)}>
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            <h4>User Detail</h4>
+            <p>
+              <strong>User ID:</strong> {selectedUser.id}
+            </p>
+            <p>
+              <strong>Name:</strong> {selectedUser.name || '-'}
+            </p>
+            <p>
+              <strong>Email:</strong> {selectedUser.email || '-'}
+            </p>
+            <p>
+              <strong>Phone number:</strong> {selectedUser.phoneNumber || '-'}
+            </p>
+            <p>
+              <strong>University:</strong> {selectedUser.university || '-'}
+            </p>
+            <p>
+              <strong>Student ID:</strong> {selectedUser.studentId || '-'}
+            </p>
+            <p>
+              <strong>Wallet balance:</strong>{' '}
+              {formatWalletBalance(selectedUser.walletBalance, walletCurrency)}
+            </p>
+            <p>
+              <strong>Bought count:</strong>{' '}
+              {selectedUser.boughtCount == null ? '-' : selectedUser.boughtCount}
+            </p>
+            <p>
+              <strong>Sold count:</strong>{' '}
+              {selectedUser.soldCount == null ? '-' : selectedUser.soldCount}
+            </p>
+            <p>
+              <strong>Rating:</strong>{' '}
+              {selectedUser.averageRating == null
+                ? '-'
+                : `${selectedUser.averageRating.toFixed(1)} (${selectedUser.ratingCount ?? 0})`}
+            </p>
+            <p>
+              <strong>Status:</strong> {selectedUser.isLocked ? 'Locked' : 'Active'}
+            </p>
+            <div className="modal-actions">
+              <button
+                className="secondary-btn"
+                onClick={() =>
+                  void controller.handleToggleUserLock(selectedUser.id, selectedUser.isLocked)
+                }
+                disabled={controller.processingUserIds.includes(selectedUser.id)}
+              >
+                {controller.processingUserIds.includes(selectedUser.id)
+                  ? 'Processing...'
+                  : selectedUser.isLocked
+                    ? 'Unlock'
+                    : 'Lock'}
+              </button>
+              <button className="action-btn" onClick={() => controller.setSelectedUser(null)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {controller.selectedReport ? (
         <div className="modal-backdrop" onClick={() => controller.setSelectedReportId(null)}>
           <div className="modal-card" onClick={(event) => event.stopPropagation()}>
@@ -612,6 +707,13 @@ function ContentSection({
   const [payoutDateFromDraft, setPayoutDateFromDraft] = useState('')
   const [payoutDateToDraft, setPayoutDateToDraft] = useState('')
   const [payoutSortOrder, setPayoutSortOrder] = useState<'newest' | 'oldest'>('newest')
+  const [orderDateFrom, setOrderDateFrom] = useState('')
+  const [orderDateTo, setOrderDateTo] = useState('')
+  const [orderDateFromDraft, setOrderDateFromDraft] = useState('')
+  const [orderDateToDraft, setOrderDateToDraft] = useState('')
+  const [orderSortOrder, setOrderSortOrder] = useState<'newest' | 'oldest'>('newest')
+  const [orderStatusFilter, setOrderStatusFilter] = useState<OrderStatusFilter>('ALL')
+  const [orderCurrency, setOrderCurrency] = useState<WalletCurrency>('VND')
 
   const isInDateRange = (value: number, fromDate: string, toDate: string): boolean => {
     const hasFrom = fromDate.trim().length > 0
@@ -641,6 +743,9 @@ function ContentSection({
   const filteredPayoutRows = controller.payoutResults.filter((item) =>
     isInDateRange(item.createdAt, payoutDateFrom, payoutDateTo)
   )
+  const filteredOrderRows = controller.orderResults.filter((item) =>
+    isInDateRange(item.createdAt, orderDateFrom, orderDateTo)
+  )
 
   const sortedProductRows = [...filteredProductRows].sort((a, b) =>
     productSortOrder === 'newest' ? b.createdAt - a.createdAt : a.createdAt - b.createdAt
@@ -650,6 +755,9 @@ function ContentSection({
   )
   const sortedPayoutRows = [...filteredPayoutRows].sort((a, b) =>
     payoutSortOrder === 'newest' ? b.createdAt - a.createdAt : a.createdAt - b.createdAt
+  )
+  const sortedOrderRows = [...filteredOrderRows].sort((a, b) =>
+    orderSortOrder === 'newest' ? b.createdAt - a.createdAt : a.createdAt - b.createdAt
   )
 
   const applyDateRange = (
@@ -676,6 +784,30 @@ function ContentSection({
     REJECTED: filteredProductRows.filter((item) => item.moderationStatus === 'REJECTED').length,
     DISABLED: filteredProductRows.filter((item) => item.moderationStatus === 'DISABLED').length
   }
+
+  const orderStatusOptions: OrderStatusFilter[] = [
+    'ALL',
+    'WAITING_PAYMENT',
+    'WAITING_CONFIRMATION',
+    'WAITING_PICKUP',
+    'SHIPPING',
+    'IN_TRANSIT',
+    'OUT_FOR_DELIVERY',
+    'DELIVERED',
+    'CANCELLED',
+    'UNKNOWN'
+  ]
+  const orderRows = sortedOrderRows.filter((item) => {
+    if (orderStatusFilter === 'ALL') return true
+    return item.status.toUpperCase() === orderStatusFilter
+  })
+  const orderCounts = orderStatusOptions.reduce<Record<OrderStatusFilter, number>>((acc, status) => {
+    acc[status] =
+      status === 'ALL'
+        ? filteredOrderRows.length
+        : filteredOrderRows.filter((item) => item.status.toUpperCase() === status).length
+    return acc
+  }, {} as Record<OrderStatusFilter, number>)
 
   const handleOpenReject = (item: ProductItem) => {
     setRejectingProduct(item)
@@ -926,6 +1058,65 @@ function ContentSection({
     </div>
   )
 
+  const orderTimeFilter = (
+    <div className="time-filter-bar">
+      <label className="time-filter-field">
+        From
+        <input
+          type="date"
+          className="time-filter-input"
+          value={orderDateFromDraft}
+          onChange={(event) => setOrderDateFromDraft(event.target.value)}
+        />
+      </label>
+      <label className="time-filter-field">
+        To
+        <input
+          type="date"
+          className="time-filter-input"
+          value={orderDateToDraft}
+          onChange={(event) => setOrderDateToDraft(event.target.value)}
+        />
+      </label>
+      <label className="time-filter-field">
+        Sort
+        <select
+          className="time-filter-input"
+          value={orderSortOrder}
+          onChange={(event) => setOrderSortOrder(event.target.value as 'newest' | 'oldest')}
+        >
+          <option value="newest">Newest</option>
+          <option value="oldest">Oldest</option>
+        </select>
+      </label>
+      <button
+        type="button"
+        className="action-btn"
+        onClick={() =>
+          applyDateRange(orderDateFromDraft, orderDateToDraft, (from, to) => {
+            setOrderDateFrom(from)
+            setOrderDateTo(to)
+          })
+        }
+        disabled={orderDateFromDraft === orderDateFrom && orderDateToDraft === orderDateTo}
+      >
+        Apply
+      </button>
+      <button
+        type="button"
+        className="secondary-btn"
+        onClick={() => {
+          setOrderDateFrom('')
+          setOrderDateTo('')
+          setOrderDateFromDraft('')
+          setOrderDateToDraft('')
+        }}
+      >
+        Clear time
+      </button>
+    </div>
+  )
+
   switch (controller.activeScreen) {
     case 'dashboard':
       return (
@@ -1029,7 +1220,7 @@ function ContentSection({
                   <th>User ID</th>
                   <th>Name</th>
                   <th>Email</th>
-                  <th>Avatar URL</th>
+                  <th>Phone Number</th>
                   <th>Wallet Balance</th>
                   <th>Status</th>
                   <th>Actions</th>
@@ -1052,20 +1243,7 @@ function ContentSection({
                       </div>
                     </td>
                     <td>{item.email}</td>
-                    <td>
-                      {item.avatarUrl ? (
-                        <a
-                          className="avatar-url-link"
-                          href={item.avatarUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          {item.avatarUrl}
-                        </a>
-                      ) : (
-                        '-'
-                      )}
-                    </td>
+                    <td>{item.phoneNumber || '-'}</td>
                     <td>{formatWalletBalance(item.walletBalance, walletCurrency)}</td>
                     <td>
                       <span className={`status-chip ${item.isLocked ? 'locked' : 'active'}`}>
@@ -1073,6 +1251,9 @@ function ContentSection({
                       </span>
                     </td>
                     <td className="actions-cell">
+                      <button className="secondary-btn" onClick={() => controller.setSelectedUser(item)}>
+                        Details
+                      </button>
                       <button
                         className="secondary-btn"
                         onClick={() => void controller.handleToggleUserLock(item.id, item.isLocked)}
@@ -1098,6 +1279,195 @@ function ContentSection({
                   <tr>
                     <td colSpan={7} className="empty-cell">
                       No users found.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      )
+
+    case 'orders':
+      if (controller.selectedOrder) {
+        const detail = controller.selectedOrder
+        return (
+          <article className="panel product-detail-page">
+            <div className="panel-top">
+              <div>
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  onClick={() => controller.setSelectedOrder(null)}
+                >
+                  Back to list
+                </button>
+                <h3 className="product-detail-title">Order {detail.id}</h3>
+                <p className="panel-note">{detail.productName}</p>
+              </div>
+              <div className="actions-cell">
+                {refreshButton}
+              </div>
+            </div>
+
+            <section className="product-detail-grid">
+              <div className="product-detail-media">
+                {detail.productImageUrl ? (
+                  <img src={detail.productImageUrl} alt={detail.productName} className="product-detail-image" />
+                ) : (
+                  <div className="product-detail-image placeholder">No image</div>
+                )}
+              </div>
+              <div className="product-detail-meta">
+                <p>
+                  <strong>Status:</strong>{' '}
+                  <span className={`status-chip ${detail.status.toLowerCase()}`}>
+                    {detail.statusLabel || detail.status}
+                  </span>
+                </p>
+                <p>
+                  <strong>Total:</strong> {formatPriceFromVnd(detail.totalAmount, orderCurrency)}
+                </p>
+                <p>
+                  <strong>Quantity:</strong> {detail.quantity}
+                </p>
+                <p>
+                  <strong>Unit price:</strong> {formatPriceFromVnd(detail.unitPrice, orderCurrency)}
+                </p>
+                <p>
+                  <strong>Buyer:</strong> {detail.buyerName || '-'} ({detail.buyerId || '-'})
+                </p>
+                <p>
+                  <strong>Buyer phone:</strong> {detail.buyerPhoneNumber || '-'}
+                </p>
+                <p>
+                  <strong>Seller:</strong> {detail.sellerName || '-'} ({detail.sellerId || '-'})
+                </p>
+                <p>
+                  <strong>Seller phone:</strong> {detail.sellerPhoneNumber || '-'}
+                </p>
+                <p>
+                  <strong>Product ID:</strong> {detail.productId || '-'}
+                </p>
+                <p>
+                  <strong>Delivery method:</strong> {detail.deliveryMethod || '-'}
+                </p>
+                <p>
+                  <strong>Payment:</strong> {formatOrderPaymentDetails(detail)}
+                </p>
+                <p>
+                  <strong>Transfer content:</strong> {detail.transferContent || '-'}
+                </p>
+                <p>
+                  <strong>Meeting point:</strong> {detail.meetingPoint || '-'}
+                </p>
+                <p>
+                  <strong>Created:</strong> {formatDateTime(detail.createdAt)}
+                </p>
+                <p>
+                  <strong>Updated:</strong> {formatDateTime(detail.updatedAt)}
+                </p>
+                <p>
+                  <strong>Payment expires:</strong> {formatDateTime(detail.paymentExpiresAt)}
+                </p>
+                <p>
+                  <strong>Payment confirmed:</strong> {formatDateTime(detail.paymentConfirmedAt)}
+                </p>
+                <div className="product-detail-section">
+                  <p>
+                    <strong>Buyer address:</strong>
+                  </p>
+                  <p className="panel-note">{formatOrderAddress(detail.buyerAddress)}</p>
+                </div>
+                <div className="product-detail-section">
+                  <p>
+                    <strong>Seller address:</strong>
+                  </p>
+                  <p className="panel-note">{formatOrderAddress(detail.sellerAddress)}</p>
+                </div>
+                <div className="product-detail-section">
+                  <p>
+                    <strong>Product detail:</strong>
+                  </p>
+                  <p className="panel-note">{detail.productDetail || 'No details.'}</p>
+                </div>
+              </div>
+            </section>
+          </article>
+        )
+      }
+
+      return (
+        <article className="panel">
+          <div className="panel-top">
+            <h3>Order Management</h3>
+            <div className="panel-actions">
+              <label className="wallet-currency-wrap">
+                Currency
+                <select
+                  className="wallet-currency-select"
+                  value={orderCurrency}
+                  onChange={(e) => setOrderCurrency(e.target.value as WalletCurrency)}
+                >
+                  <option value="VND">VND (â‚«)</option>
+                  <option value="USD">$ (USD, 1$ = {USD_TO_VND_RATE.toLocaleString('vi-VN')}Ä‘)</option>
+                </select>
+              </label>
+              {refreshButton}
+            </div>
+          </div>
+          {orderTimeFilter}
+          <div className="moderation-filters">
+            {orderStatusOptions.map((status) => (
+              <button
+                key={status}
+                type="button"
+                className={`moderation-filter-btn ${orderStatusFilter === status ? 'active' : ''}`}
+                onClick={() => setOrderStatusFilter(status)}
+              >
+                {status} ({orderCounts[status]})
+              </button>
+            ))}
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Order ID</th>
+                  <th>Product</th>
+                  <th>Buyer</th>
+                  <th>Seller</th>
+                  <th>Total ({orderCurrency})</th>
+                  <th>Status</th>
+                  <th>Created</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {orderRows.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.id}</td>
+                    <td>{item.productName}</td>
+                    <td>{item.buyerName || item.buyerId || '-'}</td>
+                    <td>{item.sellerName || item.sellerId || '-'}</td>
+                    <td>{formatPriceFromVnd(item.totalAmount, orderCurrency)}</td>
+                    <td>
+                      <span className={`status-chip ${item.status.toLowerCase()}`}>
+                        {item.statusLabel || item.status}
+                      </span>
+                    </td>
+                    <td>{formatDateTime(item.createdAt)}</td>
+                    <td className="actions-cell">
+                      <button className="action-btn" onClick={() => controller.setSelectedOrder(item)}>
+                        View
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {orderRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="empty-cell">
+                      No orders found.
                     </td>
                   </tr>
                 ) : null}

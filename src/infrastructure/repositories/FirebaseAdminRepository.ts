@@ -25,6 +25,9 @@ import {
 } from 'firebase/firestore'
 import {
   DashboardData,
+  OrderAddress,
+  OrderItem,
+  OrderPaymentMethodDetails,
   ProductModerationAction,
   ProductItem,
   ProductSaveInput,
@@ -93,6 +96,118 @@ function toStringList(value: unknown): string[] {
   return value
     .map((item) => toStringOrEmpty(item))
     .filter((item) => item.length > 0)
+}
+
+function firstStringFromList(value: unknown): string {
+  return Array.isArray(value)
+    ? value.map((item) => toStringOrEmpty(item)).find((item) => item.length > 0) ?? ''
+    : ''
+}
+
+function toRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+}
+
+function firstString(
+  data: Record<string, unknown>,
+  nested: Record<string, unknown>,
+  ...keys: string[]
+): string {
+  for (const key of keys) {
+    const direct = toStringOrEmpty(data[key])
+    if (direct) return direct
+    const nestedValue = toStringOrEmpty(nested[key])
+    if (nestedValue) return nestedValue
+  }
+  return ''
+}
+
+function firstNumber(
+  data: Record<string, unknown>,
+  nested: Record<string, unknown>,
+  ...keys: string[]
+): number | null {
+  for (const key of keys) {
+    const direct = toNumberOrNullFromUnknown(data[key])
+    if (direct != null) return direct
+    const nestedValue = toNumberOrNullFromUnknown(nested[key])
+    if (nestedValue != null) return nestedValue
+  }
+  return null
+}
+
+function firstMillis(
+  data: Record<string, unknown>,
+  nested: Record<string, unknown>,
+  ...keys: string[]
+): number {
+  for (const key of keys) {
+    const direct = toMillis(data[key])
+    if (direct > 0) return direct
+    const nestedValue = toMillis(nested[key])
+    if (nestedValue > 0) return nestedValue
+  }
+  return 0
+}
+
+function toOrderAddress(value: unknown): OrderAddress | null {
+  const map = toRecord(value)
+  const recipientName = toStringOrEmpty(map.recipientName)
+  const phoneNumber = toStringOrEmpty(map.phoneNumber)
+  const addressLine = toStringOrEmpty(map.addressLine)
+  if (!recipientName && !phoneNumber && !addressLine) return null
+
+  return {
+    id: toStringOrEmpty(map.id),
+    recipientName,
+    phoneNumber,
+    addressLine,
+    isDefault: map.isDefault === true
+  }
+}
+
+function toOrderPaymentMethodDetails(value: unknown): OrderPaymentMethodDetails | null {
+  const map = toRecord(value)
+  const type = toStringOrEmpty(map.type)
+  const label = toStringOrEmpty(map.label)
+  const accountName = toStringOrEmpty(map.accountName)
+  const accountNumber = toStringOrEmpty(map.accountNumber)
+  const bankCode = toStringOrEmpty(map.bankCode)
+  const bankName = toStringOrEmpty(map.bankName)
+  const phoneNumber = toStringOrEmpty(map.phoneNumber)
+  const note = toStringOrEmpty(map.note)
+  if (!type && !label && !accountName && !accountNumber && !phoneNumber) return null
+
+  return {
+    type,
+    label,
+    accountName,
+    accountNumber,
+    bankCode,
+    bankName,
+    phoneNumber,
+    note
+  }
+}
+
+function normalizeOrderStatus(value: string): string {
+  const normalized = value.trim().toUpperCase().replace(/[-\s]+/g, '_')
+  if (!normalized) return 'UNKNOWN'
+  if (['WAIT_PAYMENT', 'WAITING_PAYMENT', 'WAIT_FOR_PAYMENT', 'PENDING_PAYMENT', 'AWAITING_PAYMENT'].includes(normalized)) {
+    return 'WAITING_PAYMENT'
+  }
+  if (['WAIT_CONFIRMATION', 'WAITING', 'WAITING_CONFIRMATION', 'WAIT_FOR_CONFIRMATION', 'CONFIRMED', 'PENDING', 'PENDING_CONFIRMATION'].includes(normalized)) {
+    return 'WAITING_CONFIRMATION'
+  }
+  if (['WAIT_PICKUP', 'WAITING_PICKUP', 'WAIT_FOR_PICKUP', 'READY_FOR_PICKUP', 'PICKUP_READY'].includes(normalized)) {
+    return 'WAITING_PICKUP'
+  }
+  if (['SHIPPING', 'SHIPPED'].includes(normalized)) return 'SHIPPING'
+  if (normalized === 'IN_TRANSIT') return 'IN_TRANSIT'
+  if (normalized === 'OUT_FOR_DELIVERY') return 'OUT_FOR_DELIVERY'
+  if (['DELIVERED', 'COMPLETED', 'SUCCESS'].includes(normalized)) return 'DELIVERED'
+  if (['CANCELLED', 'CANCELED', 'FAILED'].includes(normalized)) return 'CANCELLED'
+  return 'UNKNOWN'
 }
 
 function toProductCategory(data: Record<string, unknown>): string {
@@ -217,9 +332,10 @@ export class FirebaseAdminRepository implements AdminRepository {
   }
 
   async loadDashboardData(): Promise<DashboardData> {
-    const [usersSnapshot, productsSnapshot, reportsSnapshot] = await Promise.all([
+    const [usersSnapshot, productsSnapshot, ordersSnapshot, reportsSnapshot] = await Promise.all([
       getDocs(collection(db, 'users')),
       getDocs(collection(db, 'products')),
+      getDocs(query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(500))),
       getDocs(query(collection(db, 'reports'), orderBy('createdAt', 'desc'), limit(25)))
     ])
 
@@ -234,6 +350,10 @@ export class FirebaseAdminRepository implements AdminRepository {
         toStringOrEmpty(data.profileImageUrl) ||
         toStringOrEmpty(data.profilePicture) ||
         toStringOrEmpty(data.imageUrl)
+      const phoneNumber =
+        toStringOrEmpty(data.phoneNumber) ||
+        toStringOrEmpty(data.phone) ||
+        toStringOrEmpty(data.mobilePhone)
       const walletBalance =
         toNumberOrNullFromUnknown(data.walletBalance) ??
         toNumberOrNullFromUnknown(data.balance) ??
@@ -251,14 +371,86 @@ export class FirebaseAdminRepository implements AdminRepository {
           (typeof data.displayName === 'string' && data.displayName.trim()) ||
           userDoc.id,
         email: (typeof data.email === 'string' && data.email.trim()) || '-',
+        phoneNumber,
         avatarUrl,
+        university: toStringOrEmpty(data.university),
+        studentId: toStringOrEmpty(data.studentId),
         walletBalance,
+        boughtCount: toNumberOrNullFromUnknown(data.boughtCount),
+        soldCount: toNumberOrNullFromUnknown(data.soldCount),
+        averageRating: toNumberOrNullFromUnknown(data.averageRating),
+        ratingCount: toNumberOrNullFromUnknown(data.ratingCount),
         isLocked
       }
     })
 
     const usersMap = new Map<string, string>()
+    const userPhoneMap = new Map<string, string>()
     users.forEach((item) => usersMap.set(item.id, item.name))
+    users.forEach((item) => userPhoneMap.set(item.id, item.phoneNumber))
+
+    const orders: OrderItem[] = ordersSnapshot.docs.map((orderDoc) => {
+      const data = orderDoc.data()
+      const productMap = toRecord(data.product)
+      const sellerMap = toRecord(data.seller)
+      const quantity = Math.max(1, Math.trunc(firstNumber(data, productMap, 'quantity', 'itemCount') ?? 1))
+      const unitPrice = firstNumber(data, productMap, 'unitPrice', 'price', 'productPrice') ?? 0
+      const totalAmount =
+        firstNumber(data, productMap, 'totalAmount', 'totalPrice', 'orderTotal', 'total', 'amount') ??
+        unitPrice * quantity
+      const buyerId =
+        firstString(data, {}, 'buyerId', 'buyerUid') ||
+        toStringOrEmpty((orderDoc.ref.parent.parent as { id?: unknown } | null)?.id)
+      const sellerId = firstString(data, sellerMap, 'sellerId', 'sellerUid', 'userId')
+      const rawStatus = firstString(data, {}, 'status', 'orderStatus')
+      const status = normalizeOrderStatus(rawStatus)
+      const statusLabel = toStringOrEmpty(data.statusLabel) || rawStatus || status
+
+      return {
+        id: orderDoc.id,
+        buyerId,
+        buyerName: firstString(data, {}, 'buyerName', 'buyerDisplayName') || usersMap.get(buyerId) || buyerId || '-',
+        buyerPhoneNumber: userPhoneMap.get(buyerId) || '',
+        sellerId,
+        sellerName:
+          firstString(data, sellerMap, 'storeName', 'sellerName', 'sellerDisplayName') ||
+          usersMap.get(sellerId) ||
+          sellerId ||
+          '-',
+        sellerPhoneNumber: userPhoneMap.get(sellerId) || '',
+        productId: firstString(data, productMap, 'productId', 'id'),
+        productName: firstString(data, productMap, 'productName', 'name') || 'Purchased Item',
+        productDetail: firstString(
+          data,
+          productMap,
+          'productDetail',
+          'productSubtitle',
+          'productDescription',
+          'description',
+          'condition'
+        ),
+        productImageUrl:
+          firstString(data, productMap, 'productImageUrl', 'imageUrl', 'thumbnailUrl') ||
+          firstStringFromList(data.imageUrls) ||
+          firstStringFromList(productMap.imageUrls),
+        quantity,
+        unitPrice,
+        totalAmount,
+        deliveryMethod: firstString(data, {}, 'deliveryMethod'),
+        paymentMethod: firstString(data, {}, 'paymentMethod'),
+        paymentMethodDetails: toOrderPaymentMethodDetails(data.paymentMethodDetails),
+        meetingPoint: firstString(data, {}, 'meetingPoint'),
+        buyerAddress: toOrderAddress(data.buyerAddress),
+        sellerAddress: toOrderAddress(data.sellerAddress),
+        transferContent: firstString(data, {}, 'transferContent'),
+        paymentExpiresAt: firstMillis(data, {}, 'paymentExpiresAt'),
+        paymentConfirmedAt: firstMillis(data, {}, 'paymentConfirmedAt'),
+        status,
+        statusLabel,
+        createdAt: firstMillis(data, productMap, 'createdAt', 'orderedAt'),
+        updatedAt: firstMillis(data, productMap, 'updatedAt', 'lastUpdatedAt', 'statusUpdatedAt')
+      }
+    })
 
     const products: ProductItem[] = productsSnapshot.docs.map((productDoc) => {
       const data = productDoc.data()
@@ -366,6 +558,7 @@ export class FirebaseAdminRepository implements AdminRepository {
       reports,
       payouts,
       users,
+      orders,
       products
     }
   }
@@ -629,11 +822,13 @@ export class FirebaseAdminRepository implements AdminRepository {
 
       return ordersSnapshot.docs.reduce((total, orderDoc) => {
         const data = orderDoc.data()
+        const productMap = toRecord(data.product)
         const createdAt = toMillis(data.createdAt)
         if (createdAt < startOfToday) return total
-        const status = typeof data.status === 'string' ? data.status : ''
+        const status = normalizeOrderStatus(toStringOrEmpty(data.status))
         if (status === 'CANCELLED') return total
-        const orderTotal = typeof data.total === 'number' ? data.total : 0
+        const orderTotal =
+          firstNumber(data, productMap, 'totalAmount', 'totalPrice', 'orderTotal', 'total', 'amount') ?? 0
         return total + orderTotal
       }, 0)
     } catch {
